@@ -140,11 +140,11 @@ alert_style = "classic"
 # custom_js_attributes = "async type = \"module\""
 
 # Custom login page image, relative to public directory or external URL
-# login_page_image = "/public/custom-background.jpg"
+login_page_image = "/public/login-bg-v2.jpg"
 
 # Custom login page image filter (Tailwind internal filters, no dark/light variants)
-# login_page_image_filter = "brightness-50 grayscale"
-# login_page_image_dark_filter = "contrast-200 blur-sm"
+login_page_image_filter = "brightness-100"
+login_page_image_dark_filter = "brightness-90"
 
 # Specify a custom meta URL (used for meta tags like og:url)
 # custom_meta_url = "https://github.com/Chainlit/chainlit"

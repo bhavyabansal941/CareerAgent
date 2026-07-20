@@ -16,7 +16,12 @@ load_dotenv()
 
 @cl.data_layer
 def get_data_layer():
-    return SQLAlchemyDataLayer(conninfo="sqlite+aiosqlite:///careeragent.db")
+    db_url = os.getenv("DATABASE_URL")
+    # Convert standard postgres:// URL to the async driver format SQLAlchemy needs
+    conninfo = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    # asyncpg doesn't accept sslmode in the URL itself — strip it and pass SSL separately
+    conninfo = conninfo.split("?")[0]
+    return SQLAlchemyDataLayer(conninfo=conninfo, connect_args={"ssl": "require"})
 
 
 @cl.oauth_callback
@@ -36,9 +41,14 @@ vision_llm = ChatGroq(groq_api_key=os.getenv("GROQ_API_KEY"), model_name="llama-
 # ---------------- Base system prompt ----------------
 BASE_PROMPT = """You are CareerAgent, a helpful AI assistant with special expertise in careers —
 resumes, job search, interview prep, and skill development. You are NOT restricted to career topics;
-answer any question on any subject to the best of your ability. When the topic is career-related,
-use extra structure (headers, bullets) and depth, and use the user's resume context if provided below
-to make advice specific rather than generic. Keep responses well-organized and avoid unnecessary length."""
+answer any question on any subject to the best of your ability.
+
+Match your response length and structure to the question:
+- Casual questions, greetings, or small talk ("what are you doing", "how are you", "hi") get a short,
+  natural, conversational reply — one or two sentences, no headers, no bullet lists.
+- Substantive questions (career advice, technical explanations, how-to requests) get structured,
+  detailed answers with headers/bullets where helpful.
+Don't pad short questions with unnecessary capability lists or headers just to seem thorough."""
 
 # ---------------- Mode-specific prompts ----------------
 MODE_PROMPTS = {
@@ -200,14 +210,24 @@ async def start():
     cl.user_session.set("history", [SystemMessage(content=BASE_PROMPT)])
     cl.user_session.set("resume_text", None)
     cl.user_session.set("active_mode", None)
+    # No message sent here — this keeps the starter buttons visible on the welcome screen
 
-    user = cl.user_session.get("user")
-    name = "there"
-    if user and user.metadata:
-        name = user.metadata.get("name") or user.metadata.get("given_name") or "there"
+@cl.on_chat_resume
+async def resume(thread: dict):
+    # Rebuild our internal history from the saved thread messages
+    history = [SystemMessage(content=BASE_PROMPT)]
+    resume_text = None
+    active_mode = None
 
-    await cl.Message(content=f"Hi {name}! 👋 I'm **CareerAgent** — ask me anything, or use the quick-start options below.").send()
+    for step in thread.get("steps", []):
+        if step.get("type") == "user_message":
+            history.append(HumanMessage(content=step.get("output", "")))
+        elif step.get("type") == "assistant_message":
+            history.append(AIMessage(content=step.get("output", "")))
 
+    cl.user_session.set("history", history)
+    cl.user_session.set("resume_text", resume_text)
+    cl.user_session.set("active_mode", active_mode)
 
 @cl.on_message
 async def main(message: cl.Message):
