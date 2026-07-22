@@ -1,6 +1,7 @@
 import chainlit as cl
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.tools import tool
 from dotenv import load_dotenv
 import os
 import base64
@@ -11,6 +12,7 @@ from pypdf import PdfReader
 from docx import Document
 import openpyxl
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+from tavily import TavilyClient
 
 load_dotenv()
 
@@ -38,6 +40,35 @@ def oauth_callback(
 llm = ChatGroq(groq_api_key=os.getenv("GROQ_API_KEY"), model_name="llama-3.3-70b-versatile")
 vision_llm = ChatGroq(groq_api_key=os.getenv("GROQ_API_KEY"), model_name="llama-3.2-11b-vision-preview")
 
+# ---------------- Web search grounding (Tavily) ----------------
+tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY")) if os.getenv("TAVILY_API_KEY") else None
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web for current, up-to-date, or time-sensitive information: exam patterns,
+    syllabi, cutoffs, application deadlines, recent policy or pattern changes, current events, or
+    anything that may have changed since your training data. Always use this before stating facts
+    about things that change over time (exam formats, eligibility criteria, dates, current rankings,
+    recent news) rather than relying on memory. Returns a summary plus source URLs to cite."""
+    if not tavily_client:
+        return "Web search is not configured (missing TAVILY_API_KEY)."
+    try:
+        results = tavily_client.search(query, max_results=5, include_answer=True)
+        output = ""
+        if results.get("answer"):
+            output += f"Summary: {results['answer']}\n\n"
+        output += "Sources:\n"
+        for r in results.get("results", []):
+            title = r.get("title", "Untitled")
+            url = r.get("url", "")
+            snippet = (r.get("content") or "")[:250]
+            output += f"- {title} ({url}): {snippet}\n"
+        return output or "No results found."
+    except Exception as e:
+        return f"Search failed: {str(e)}"
+
+llm_with_tools = llm.bind_tools([web_search])
+
 # ---------------- Base system prompt ----------------
 BASE_PROMPT = """You are CareerAgent, a helpful AI assistant with special expertise in careers —
 resumes, job search, interview prep, and skill development. You are NOT restricted to career topics;
@@ -48,7 +79,17 @@ Match your response length and structure to the question:
   natural, conversational reply — one or two sentences, no headers, no bullet lists.
 - Substantive questions (career advice, technical explanations, how-to requests) get structured,
   detailed answers with headers/bullets where helpful.
-Don't pad short questions with unnecessary capability lists or headers just to seem thorough."""
+Don't pad short questions with unnecessary capability lists or headers just to seem thorough.
+
+You have a web_search tool. Use it whenever a question involves something that can change over time —
+exam patterns, syllabi, eligibility criteria, cutoffs, application deadlines, current job openings,
+recent policy changes, or any fact you're not certain is still current. Do not answer time-sensitive
+questions from memory alone.
+When you use web_search, cite the source URLs it returns so the user can verify the information themselves.
+If web_search is unavailable or returns nothing useful, say so plainly and tell the user to check the
+official source — never state an unverified time-sensitive fact as if it were certain.
+Never promise to "remember this for next time" or "update your knowledge going forward" — each
+conversation starts fresh with no memory of this correction, so don't imply otherwise."""
 
 # ---------------- Mode-specific prompts ----------------
 MODE_PROMPTS = {
@@ -167,7 +208,7 @@ def search_jobs(query: str, location: str = "in"):
     if not app_id or not app_key:
         return None
     url = f"https://api.adzuna.com/v1/api/jobs/{location}/search/1"
-    params = {"app_id": app_id, "app_key": app_key, "results_per_page": 5, "what": query, "content-type": "application/json"}
+    params = {"app_id": app_id, "app_key": app_key, "results_per_page": 10, "what": query, "content-type": "application/json"}
     try:
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
@@ -291,7 +332,22 @@ async def main(message: cl.Message):
         system_content += f"\n\nUser's resume/background content:\n{resume_text[:3000]}"
 
     conversation = [SystemMessage(content=system_content)] + history[1:] + [HumanMessage(content=user_text)]
-    response = llm.invoke(conversation)
+
+    response = llm_with_tools.invoke(conversation)
+
+    # Handle web_search tool calls (search grounding for time-sensitive facts)
+    max_tool_rounds = 3
+    rounds = 0
+    while getattr(response, "tool_calls", None) and rounds < max_tool_rounds:
+        conversation.append(response)
+        for tool_call in response.tool_calls:
+            if tool_call["name"] == "web_search":
+                result = web_search.invoke(tool_call["args"])
+            else:
+                result = f"Unknown tool: {tool_call['name']}"
+            conversation.append(ToolMessage(content=result, tool_call_id=tool_call["id"]))
+        response = llm_with_tools.invoke(conversation)
+        rounds += 1
 
     history.append(HumanMessage(content=user_text))
     history.append(AIMessage(content=response.content))
