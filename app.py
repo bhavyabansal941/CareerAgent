@@ -49,7 +49,10 @@ def web_search(query: str) -> str:
     syllabi, cutoffs, application deadlines, recent policy or pattern changes, current events, or
     anything that may have changed since your training data. Always use this before stating facts
     about things that change over time (exam formats, eligibility criteria, dates, current rankings,
-    recent news) rather than relying on memory. Returns a summary plus source URLs to cite."""
+    recent news) rather than relying on memory. Returns a summary plus source URLs to cite.
+    For best results on official/government topics, include the official body's name or "official
+    site" in the query (e.g. "SSC CGL exam pattern official ssc.gov.in") to help surface authoritative
+    sources over forums or blogs."""
     if not tavily_client:
         return "Web search is not configured (missing TAVILY_API_KEY)."
     try:
@@ -85,6 +88,12 @@ You have a web_search tool. Use it whenever a question involves something that c
 exam patterns, syllabi, eligibility criteria, cutoffs, application deadlines, current job openings,
 recent policy changes, or any fact you're not certain is still current. Do not answer time-sensitive
 questions from memory alone.
+When searching for exam patterns, government schemes, official eligibility criteria, or similar official
+information, prefer official sources: government/commission websites (.gov, .nic.in, .gov.in), the
+official body's own site (e.g. ssc.gov.in for SSC exams, upsc.gov.in for UPSC), or well-established news
+outlets. Avoid relying solely on forums, Quora, YouTube, or unverified blogs for facts like this — if the
+first search results are mostly low-quality sources, run a follow-up search adding terms like "official"
+or the specific body's name to try to surface the authoritative source.
 When you use web_search, cite the source URLs it returns so the user can verify the information themselves.
 If web_search is unavailable or returns nothing useful, say so plainly and tell the user to check the
 official source — never state an unverified time-sensitive fact as if it were certain.
