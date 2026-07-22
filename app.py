@@ -210,13 +210,34 @@ def classify_intent(user_text: str, active_mode: str) -> str:
     return llm_classify(user_text)
 
 # ---------------- Free job search via Adzuna ----------------
-def search_jobs(query: str, location: str = "in"):
+def extract_job_query(text: str):
+    """Pull a clean job title/keywords and location out of a natural-language request,
+    since Adzuna matches keywords literally and a full sentence rarely matches anything."""
+    prompt = f"""Extract the job title/keywords and location from this job search request.
+Reply with ONLY a JSON object, no other text, no markdown, in this exact format:
+{{"what": "job title or keywords only", "where": "city/location or empty string if none mentioned"}}
+
+Message: "{text}"
+JSON:"""
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = resp.content.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(raw)
+        what = data.get("what", "").strip() or text
+        where = data.get("where", "").strip()
+        return what, where
+    except Exception:
+        return text, ""
+
+def search_jobs(query: str, where: str = "", location: str = "in"):
     app_id = os.getenv("ADZUNA_APP_ID")
     app_key = os.getenv("ADZUNA_APP_KEY")
     if not app_id or not app_key:
         return None
     url = f"https://api.adzuna.com/v1/api/jobs/{location}/search/1"
     params = {"app_id": app_id, "app_key": app_key, "results_per_page": 10, "what": query, "content-type": "application/json"}
+    if where:
+        params["where"] = where
     try:
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
@@ -320,12 +341,16 @@ async def main(message: cl.Message):
         cl.user_session.set("active_mode", None)
 
     if intent == "job_search":
-        results = search_jobs(user_text)
+        job_title, job_location = extract_job_query(user_text)
+        results = search_jobs(job_title, where=job_location)
         if results is None:
             await cl.Message(content="⚠️ Job search needs Adzuna API keys in `.env` — add `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` to enable this.").send()
             return
+        if not results and job_location:
+            # Retry without the location filter in case it was too narrow/misspelled
+            results = search_jobs(job_title)
         if not results:
-            await cl.Message(content="No live listings found for that search. Try different keywords.").send()
+            await cl.Message(content=f"No live listings found for \"{job_title}\"{' in ' + job_location if job_location else ''}. Try different or broader keywords.").send()
             return
         reply = "**Live job listings:**\n\n"
         for job in results:
