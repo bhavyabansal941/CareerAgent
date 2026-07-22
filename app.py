@@ -50,9 +50,8 @@ def web_search(query: str) -> str:
     anything that may have changed since your training data. Always use this before stating facts
     about things that change over time (exam formats, eligibility criteria, dates, current rankings,
     recent news) rather than relying on memory. Returns a summary plus source URLs to cite.
-    For best results on official/government topics, include the official body's name or "official
-    site" in the query (e.g. "SSC CGL exam pattern official ssc.gov.in") to help surface authoritative
-    sources over forums or blogs."""
+    For official/government topics, include the official body's name in the query (e.g. "SSC CGL
+    exam pattern ssc.gov.in") to help surface authoritative sources over forums or blogs."""
     if not tavily_client:
         return "Web search is not configured (missing TAVILY_API_KEY)."
     try:
@@ -92,8 +91,8 @@ When searching for exam patterns, government schemes, official eligibility crite
 information, prefer official sources: government/commission websites (.gov, .nic.in, .gov.in), the
 official body's own site (e.g. ssc.gov.in for SSC exams, upsc.gov.in for UPSC), or well-established news
 outlets. Avoid relying solely on forums, Quora, YouTube, or unverified blogs for facts like this — if the
-first search results are mostly low-quality sources, run a follow-up search adding terms like "official"
-or the specific body's name to try to surface the authoritative source.
+first search results are mostly low-quality sources, run a follow-up search using different keywords
+(such as the official body's name) to try to surface the authoritative source.
 When you use web_search, cite the source URLs it returns so the user can verify the information themselves.
 If web_search is unavailable or returns nothing useful, say so plainly and tell the user to check the
 official source — never state an unverified time-sensitive fact as if it were certain.
@@ -342,21 +341,29 @@ async def main(message: cl.Message):
 
     conversation = [SystemMessage(content=system_content)] + history[1:] + [HumanMessage(content=user_text)]
 
-    response = llm_with_tools.invoke(conversation)
-
-    # Handle web_search tool calls (search grounding for time-sensitive facts)
-    max_tool_rounds = 3
-    rounds = 0
-    while getattr(response, "tool_calls", None) and rounds < max_tool_rounds:
-        conversation.append(response)
-        for tool_call in response.tool_calls:
-            if tool_call["name"] == "web_search":
-                result = web_search.invoke(tool_call["args"])
-            else:
-                result = f"Unknown tool: {tool_call['name']}"
-            conversation.append(ToolMessage(content=result, tool_call_id=tool_call["id"]))
+    try:
         response = llm_with_tools.invoke(conversation)
-        rounds += 1
+
+        # Handle web_search tool calls (search grounding for time-sensitive facts)
+        max_tool_rounds = 3
+        rounds = 0
+        while getattr(response, "tool_calls", None) and rounds < max_tool_rounds:
+            conversation.append(response)
+            for tool_call in response.tool_calls:
+                if tool_call["name"] == "web_search":
+                    result = web_search.invoke(tool_call["args"])
+                else:
+                    result = f"Unknown tool: {tool_call['name']}"
+                conversation.append(ToolMessage(content=result, tool_call_id=tool_call["id"]))
+            response = llm_with_tools.invoke(conversation)
+            rounds += 1
+    except Exception:
+        # Groq occasionally rejects a malformed function call (tool_use_failed) — fall back to a
+        # plain, non-tool response rather than crashing the request.
+        try:
+            response = llm.invoke(conversation)
+        except Exception:
+            response = AIMessage(content="Sorry, I ran into an error generating a response. Please try again.")
 
     history.append(HumanMessage(content=user_text))
     history.append(AIMessage(content=response.content))
