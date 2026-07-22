@@ -17,6 +17,7 @@ An AI-powered career assistant that reviews resumes, checks ATS keyword alignmen
 - **Google sign-in** with persistent chat history, so past conversations are saved across sessions
 - **Multi-format file support** — PDF, DOCX, XLSX, plain text, and images (read via a vision model)
 - **General-purpose chat** — not restricted to career topics; handles any question
+- **Real-time web search grounding** — for time-sensitive questions (exam patterns, cutoffs, deadlines, current info), the bot searches the web before answering and cites its sources, instead of relying on stale training data
 
 ## How it works
 
@@ -34,6 +35,7 @@ CareerAgent classifies each message's intent (keyword matching first, LLM classi
 | Job search | Adzuna API |
 | File parsing | pypdf, python-docx, openpyxl |
 | Hosting | Render |
+| Search grounding | Tavily |
 
 ## Running locally
 
@@ -54,6 +56,7 @@ CareerAgent classifies each message's intent (keyword matching first, LLM classi
    DATABASE_URL=your_postgres_url
    ADZUNA_APP_ID=your_adzuna_app_id       # optional — enables live job search
    ADZUNA_APP_KEY=your_adzuna_app_key     # optional — enables live job search
+   TAVILY_API_KEY=your_tavily_key       # enables real-time web search grounding
    ```
 
 3. Run the app:
