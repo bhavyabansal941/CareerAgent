@@ -368,7 +368,13 @@ async def main(message: cl.Message):
     if intent in MODE_PROMPTS:
         system_content += "\n\n" + MODE_PROMPTS[intent]
     if resume_text:
-        system_content += f"\n\nUser's resume/background content:\n{resume_text[:3000]}"
+        # 12000 chars comfortably covers even a dense 2-page resume; llama-3.3-70b has a
+        # 128k token context window, so there's ample room without needing to truncate this tightly.
+        RESUME_CHAR_LIMIT = 12000
+        truncated_resume = resume_text[:RESUME_CHAR_LIMIT]
+        system_content += f"\n\nUser's resume/background content:\n{truncated_resume}"
+        if len(resume_text) > RESUME_CHAR_LIMIT:
+            system_content += "\n\n[Note: the resume/background content above was truncated because it exceeded the length limit — mention to the user that only part of their document was reviewed.]"
 
     conversation = [SystemMessage(content=system_content)] + history[1:] + [HumanMessage(content=user_text)]
 
